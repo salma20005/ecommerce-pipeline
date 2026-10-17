@@ -83,15 +83,12 @@ services:
 
   # Spark runs in local mode: one container, [2] threads.
   # Jobs are submitted into it with docker exec ... spark-submit
+  # (Official Apache image; Bitnami removed their free images from Docker Hub)
   spark:
-    image: bitnami/spark:3.5
+    image: apache/spark:3.5.7-python3
     container_name: spark
     environment:
       - SPARK_MODE=local
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
     ports:
       - "4040:4040"   # Spark job UI (while a job runs)
     volumes:
