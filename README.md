@@ -33,9 +33,3 @@ CSV (historical replay) → Kafka → Spark Batch / Structured Streaming → HDF
    - Kafka UI: http://localhost:8081
    - HDFS UI: http://localhost:9870
    - Spark UI: http://localhost:4040 (while a job runs)
-
-## Team
-
-- Member 1 — Kafka + producer
-- Member 2 — Spark batch/streaming + HDFS + MLlib
-- Member 3 — ClickHouse + FastAPI + Power BI
