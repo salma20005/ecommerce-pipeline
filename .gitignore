@@ -1,0 +1,20 @@
+# Big files / datasets - never push these to GitHub
+*.csv
+*.parquet
+
+# Docker / local data (HDFS volumes)
+data/
+hadoop_namenode/
+hadoop_datanode/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

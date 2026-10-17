@@ -1,0 +1,101 @@
+# ============================================================
+# Stage 1: Kafka (KRaft mode - no Zookeeper, lighter on RAM)
+# Later stages add: HDFS, Spark, ClickHouse, Airflow, FastAPI
+# ============================================================
+services:
+
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: kafka
+    ports:
+      - "9092:9092"   # broker
+      - "8081:8080"   # built-in UI (optional)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      # listeners
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      # single-node defaults
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # allow big messages (a batch of events per message)
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      # topic auto-creation defaults
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+    mem_limit: 1500m
+
+  # Python "replay producer": reads the CSV like a live clickstream
+  # and pushes events to Kafka topic: user-events
+  producer:
+    build: ./producer
+    container_name: producer
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      # D:/bigdata is where we keep the CSV (created in the next step)
+      CSV_PATH: /data/2019-Oct.csv
+      TOPIC: user-events
+      # replay speed: 0 = as fast as possible, 500 = 500 events/sec
+      EVENTS_PER_SEC: 2000
+    volumes:
+      - D:/bigdata:/data
+    mem_limit: 512m
+
+  # ============================================================
+  # Stage 3: HDFS (single node) + Spark (local mode)
+  # ============================================================
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: unless-stopped
+    ports:
+      - "9870:9870"   # HDFS web UI
+    environment:
+      - CLUSTER_NAME=ecommerce
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    volumes:
+      - D:/bigdata/hadoop_namenode:/hadoop/dfs/name
+    mem_limit: 1g
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: unless-stopped
+    ports:
+      - "9864:9864"   # datanode web UI
+    environment:
+      - CLUSTER_NAME=ecommerce
+      - CORE_CONF_fs_defaultFS=hdfs://namenode:9000
+    volumes:
+      - D:/bigdata/hadoop_datanode:/hadoop/dfs/data
+    depends_on:
+      - namenode
+    mem_limit: 2g
+
+  # Spark runs in local mode: one container, [2] threads.
+  # Jobs are submitted into it with docker exec ... spark-submit
+  spark:
+    image: bitnami/spark:3.5
+    container_name: spark
+    environment:
+      - SPARK_MODE=local
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+    ports:
+      - "4040:4040"   # Spark job UI (while a job runs)
+    volumes:
+      - ./spark:/opt/spark-jobs
+      - D:/bigdata:/data
+    command: sleep infinity
+    mem_limit: 7g
