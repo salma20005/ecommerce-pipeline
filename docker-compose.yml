@@ -79,7 +79,9 @@ services:
       - D:/bigdata/hadoop_datanode:/hadoop/dfs/data
     depends_on:
       - namenode
-    mem_limit: 2g
+    # 4g: the datanode crashed at 2g ("Cannot allocate memory") while the
+    # ETL wrote 3 partitioned-by-date datasets in parallel.
+    mem_limit: 4g
 
   # Spark runs in local mode: one container, [2] threads.
   # Jobs are submitted into it with docker exec ... spark-submit
