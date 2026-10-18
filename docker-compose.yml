@@ -48,7 +48,8 @@ services:
       EVENTS_PER_SEC: 2000
     volumes:
       - D:/bigdata:/data
-    mem_limit: 512m
+    # 1536m: the default 512m crashed with OOM while parsing the 5 GB CSV.
+    mem_limit: 1536m
 
   # ============================================================
   # Stage 3: HDFS (single node) + Spark (local mode)
