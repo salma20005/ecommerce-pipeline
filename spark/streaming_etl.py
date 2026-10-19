@@ -111,7 +111,9 @@ def aggregate_windows(df):
         .groupBy(F.window(F.col("event_time"), f"{WINDOW_MINUTES} minutes"))
         .agg(
             F.count("*").alias("event_count"),
-            F.count_distinct("user_session").alias("sessions"),
+            # approx_count_distinct: streaming does not support count(DISTINCT ...);
+            # HyperLogLog estimate (~96-99% accurate) is fine for a metrics dashboard.
+            F.approx_count_distinct("user_session").alias("sessions"),
             F.sum((F.col("event_type") == "view").cast("int")).alias("views"),
             F.sum((F.col("event_type") == "cart").cast("int")).alias("carts"),
             F.sum((F.col("event_type") == "purchase").cast("int")).alias("purchases"),
