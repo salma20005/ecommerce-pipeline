@@ -28,6 +28,7 @@ would ask for far more.
 
 import sys
 
+from pyspark import StorageLevel
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType, IntegerType, LongType
@@ -178,8 +179,11 @@ def main() -> None:
     clean_df = clean(df)
     clean_df = engineer(clean_df)
 
-    # cache because we use it three times (raw copy, events, sessions)
-    clean_df.cache()
+    # Persist because we use it three times (raw copy, events, sessions).
+    # DISK_ONLY on purpose: caching 42M rows in RAM made the JVM freeze in a
+    # GC death spiral on this 8 GB laptop (killed the driver twice) - disk is
+    # slower but the job actually finishes.
+    clean_df.persist(StorageLevel.DISK_ONLY)
     clean_count = clean_df.count()
     print(f"[batch_etl] clean rows = {clean_count:,}", flush=True)
 
