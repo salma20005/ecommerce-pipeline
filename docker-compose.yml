@@ -116,7 +116,10 @@ services:
       CLICKHOUSE_DB: ecommerce
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - D:/bigdata/clickhouse:/var/lib/clickhouse
+      # named volume, not D:/bigdata bind mount: the clickhouse user (uid 101)
+      # gets Permission denied writing to a Windows-mounted folder.
+      # The volume still lives on the D: drive (Docker's VHDX is there).
+      - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse/config.d:/etc/clickhouse-server/config.d:ro
     mem_limit: 1g
 
@@ -138,3 +141,7 @@ services:
     command: python clickhouse_loader.py
     restart: unless-stopped
     mem_limit: 256m
+
+# Named volumes (Docker manages them; physically on the D: drive VHDX)
+volumes:
+  clickhouse-data:
