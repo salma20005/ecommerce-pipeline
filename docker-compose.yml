@@ -99,3 +99,42 @@ services:
       - D:/bigdata:/data
     command: sleep infinity
     mem_limit: 7g
+
+  # ============================================================
+  # Stage 4: ClickHouse - analytical serving layer.
+  # HDFS stores the big files; ClickHouse answers dashboard
+  # queries in milliseconds. Power BI reads it via HTTP (:8123).
+  # ============================================================
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: clickhouse
+    restart: unless-stopped
+    ports:
+      - "8123:8123"   # HTTP API (loader + Power BI)
+      - "9000:9000"   # native protocol (Spark JDBC)
+    environment:
+      CLICKHOUSE_DB: ecommerce
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - D:/bigdata/clickhouse:/var/lib/clickhouse
+      - ./clickhouse/config.d:/etc/clickhouse-server/config.d:ro
+    mem_limit: 1g
+
+  # Tiny Python consumer: Kafka summary topics -> ClickHouse tables.
+  # Reuses the producer image (already has kafka-python) with a
+  # different command, so no extra image build is needed.
+  ch-loader:
+    image: ecommerce-pipeline-producer:latest
+    container_name: ch-loader
+    depends_on:
+      - kafka
+      - clickhouse
+    environment:
+      KAFKA_BOOTSTRAP: kafka:9092
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DB: ecommerce
+    volumes:
+      - ./loader/clickhouse_loader.py:/app/clickhouse_loader.py:ro
+    command: python clickhouse_loader.py
+    restart: unless-stopped
+    mem_limit: 256m

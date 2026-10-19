@@ -1,0 +1,5 @@
+<!-- 8 GB laptop: keep ClickHouse well under its 1 GB container cap -->
+<clickhouse>
+    <max_server_memory_usage>768m</max_server_memory_usage>
+    <max_concurrent_queries>40</max_concurrent_queries>
+</clickhouse>
