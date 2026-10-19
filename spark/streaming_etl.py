@@ -53,6 +53,9 @@ CHECKPOINT = "file:///data/checkpoints/streaming"   # survives restarts
 # recent baseline. Simple, explainable, no ML needed for this step.
 ALERT_FACTOR = 3.0        # 3x the mean
 ALERT_MIN_VIEWS = 200     # ignore tiny windows, too noisy
+# Streaming cannot use LAG() for the previous window, so the baseline is fixed:
+# the overall conversion rate computed by the batch job (6.8136%).
+ALERT_BASELINE = 0.068136
 
 EVENT_SCHEMA = StructType([
     StructField("event_time", TimestampType(), True),
@@ -135,23 +138,20 @@ def aggregate_windows(df):
 
 
 def detect_anomalies(metrics_df):
-    """Flag windows whose conversion rate spikes above the running baseline.
+    """Flag windows whose conversion rate spikes above the baseline.
 
-    Implementation: shift the previous window's rate onto the current row,
-    then alert when current > ALERT_FACTOR x previous (with a minimum volume
-    so a single stray purchase in a dead window does not page anyone).
+    Structured Streaming does not support row window functions (LAG/LEAD), so
+    instead of the previous window we compare against a fixed baseline: the
+    overall conversion rate from the batch job (ALERT_BASELINE). Alert when
+    current > ALERT_FACTOR x baseline (with a minimum volume so a single stray
+    purchase in a dead window does not page anyone).
     """
-    from pyspark.sql import Window
-
-    baseline = Window.orderBy("window_start")
-
     return (
         metrics_df
-        .withColumn("prev_conversion", F.lag("conversion_rate", 1).over(baseline))
+        .withColumn("prev_conversion", F.lit(float(ALERT_BASELINE)))
         .withColumn(
             "is_anomaly",
             (F.col("views") >= ALERT_MIN_VIEWS)
-            & F.col("prev_conversion").isNotNull()
             & (F.col("conversion_rate") > F.col("prev_conversion") * F.lit(float(ALERT_FACTOR))),
         )
         .filter(F.col("is_anomaly"))
