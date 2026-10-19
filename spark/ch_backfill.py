@@ -14,12 +14,19 @@ the JDBC writer (the poster's "Spark writes results into it (JDBC)"):
 The live tables (event_metrics / business_alerts) are filled by
 loader/clickhouse_loader.py straight from Kafka - no backfill needed.
 
-Run AFTER ClickHouse is up and clickhouse/init.sql has been applied:
+Run AFTER ClickHouse is up and clickhouse/init.sql has been applied.
+Note: --packages rejects the ":all" classifier, so the shaded jar is
+downloaded once and passed with --jars instead:
+
+    docker exec spark python3 -c "import urllib.request; \
+        urllib.request.urlretrieve( \
+        'https://repo1.maven.org/maven2/com/clickhouse/clickhouse-jdbc/0.4.6/clickhouse-jdbc-0.4.6-all.jar', \
+        '/tmp/clickhouse-jdbc-all.jar')"
 
     docker exec spark /opt/spark/bin/spark-submit \
         --master 'local[2]' \
         --driver-memory 1g \
-        --packages com.clickhouse:clickhouse-jdbc:0.4.6:all \
+        --jars /tmp/clickhouse-jdbc-all.jar \
         /opt/spark-jobs/ch_backfill.py
 """
 
@@ -50,10 +57,17 @@ def main() -> None:
     for path, table in TABLES:
         df = spark.read.parquet(path)
         count = df.count()
-        # "append", not "overwrite": overwrite would DROP the table and
-        # recreate it with default MergeTree, losing the ReplacingMergeTree
-        # engine defined in init.sql.
-        df.write.mode("append").jdbc(CH_URL, f"ecommerce.{table}", CH_PROPS)
+        # keyword args on purpose: in Spark 3.5 the signature is
+        # jdbc(url, table, mode, properties) - passing CH_PROPS positionally
+        # would land it in the "mode" parameter.
+        df.write.jdbc(
+            url=CH_URL,
+            table=f"ecommerce.{table}",
+            mode="append",          # append, not overwrite: overwrite would DROP
+                                    # the table and lose the ReplacingMergeTree
+                                    # engine defined in init.sql.
+            properties=CH_PROPS,
+        )
         print(f"[ch-backfill] {table}: wrote {count:,} rows", flush=True)
 
     spark.stop()
