@@ -187,6 +187,7 @@ def start_metrics_sink(metrics_df):
 
     return (
         out.writeStream
+        .format("kafka")  # required: without it Spark treats this as a file sink
         .outputMode("update")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("topic", TOPIC_METRICS)
@@ -207,6 +208,7 @@ def start_alert_sink(alerts_df):
 
     return (
         out.writeStream
+        .format("kafka")  # required: without it Spark treats this as a file sink
         .outputMode("update")
         .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP)
         .option("topic", TOPIC_ALERTS)
