@@ -58,7 +58,11 @@ def build_spark(app_name: str) -> SparkSession:
         SparkSession.builder
         .appName(app_name)
         .config("spark.hadoop.fs.defaultFS", "hdfs://namenode:9000")
-        .config("spark.sql.shuffle.partitions", "8")   # laptop-sized, not cluster-sized
+        # 16, not 8: with 8, each reduce task sorted ~1.2 GB and ran 65 min,
+        # which starved the driver's heartbeat threads (60 failed beats -> JVM
+        # exit) on this 8 GB laptop. 16 halves per-task sort -> same total
+        # work, but the driver stays responsive.
+        .config("spark.sql.shuffle.partitions", "16")  # laptop-sized, not cluster-sized
         .config("spark.sql.adaptive.enabled", "true")
         .getOrCreate()
     )
