@@ -7,6 +7,9 @@ data/
 hadoop_namenode/
 hadoop_datanode/
 
+# Local machine memory tuning -- never push (differs per laptop)
+docker-compose.override.yml
+
 # Python
 __pycache__/
 *.pyc

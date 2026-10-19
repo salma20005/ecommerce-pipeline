@@ -150,7 +150,7 @@ def detect_anomalies(metrics_df):
             "is_anomaly",
             (F.col("views") >= ALERT_MIN_VIEWS)
             & F.col("prev_conversion").isNotNull()
-            & (F.col("conversion_rate") > F.col("prev_conversion") * F.implicit_cast(ALERT_FACTOR, "double")),
+            & (F.col("conversion_rate") > F.col("prev_conversion") * F.lit(float(ALERT_FACTOR))),
         )
         .filter(F.col("is_anomaly"))
         .withColumn(
