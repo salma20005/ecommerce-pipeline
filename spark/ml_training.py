@@ -97,7 +97,7 @@ def main() -> None:
     spark = build_spark()
 
     # ---- step 1/7: read -------------------------------------------------
-    log("step 1/7: reading sessions from", SESSIONS)
+    log(f"step 1/7: reading sessions from {SESSIONS}")
     sessions = spark.read.parquet(SESSIONS)
     log(f"       total sessions: {sessions.count():,}")
 
@@ -151,7 +151,7 @@ def main() -> None:
     results = []
     fitted = {}
     for name, clf in candidates.items():
-        if "weightCol" not in clf.getParamNames():
+        if not clf.hasParam("weightCol"):
             log(f"step 5/7: {name} does not support weightCol -> training unweighted")
         t0 = time.time()
         log(f"step 5/7: training {name} ...")

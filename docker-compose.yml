@@ -142,6 +142,26 @@ services:
     restart: unless-stopped
     mem_limit: 256m
 
+  # ============================================================
+  # Model deployment (FastAPI) - poster: "MODEL DEPLOYMENT".
+  # Serves the best model saved by ml_training.py in HDFS /models.
+  # Built FROM the Spark image: loading a Spark ML model needs
+  # PySpark + JVM + the HDFS client.
+  # Interactive docs at http://localhost:8000/docs
+  # ============================================================
+  api:
+    build: ./api
+    container_name: api
+    depends_on:
+      - namenode
+      - datanode
+    ports:
+      - "8000:8000"   # GET /  |  POST /predict  |  /docs
+    environment:
+      MODEL_PATH: hdfs://namenode:9000/models/best_model
+    restart: unless-stopped
+    mem_limit: 2g
+
 # Named volumes (Docker manages them; physically on the D: drive VHDX)
 volumes:
   clickhouse-data:
