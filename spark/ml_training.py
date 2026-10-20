@@ -8,9 +8,13 @@ browsing session; the question is: will this session end in a purchase?
 
 Steps (printed as [ml] step k/7 while running):
   1. read the validated sessions parquet produced by batch_etl.py
-  2. assemble the feature vector. NOTE: purchase_count is deliberately
-     EXCLUDED -- purchased = (purchase_count > 0), so keeping it would be
-     pure data leakage (the model would read the answer from the question).
+  2. assemble the feature vector. TWO columns are excluded on purpose:
+       purchase_count -- it IS the label (purchased = purchase_count > 0)
+       event_count    -- batch_etl guarantees event_count =
+                         view_count + cart_count + purchase_count, so keeping
+                         it would let the model recompute purchase_count and
+                         read the answer from the question (the first run
+                         scored LogisticRegression AUC = 1.0000)
   3. user-based 80/20 split: pmod(user_id, 5) == 0 -> test.
      The same user never appears in both sets (no leakage / no memorizing).
   4. class weights: only ~6.8% of sessions purchase (1:13 imbalance).
@@ -58,14 +62,35 @@ SESSIONS = "hdfs://namenode:9000/curated/sessions"
 MODELS_DIR = "hdfs:///models"
 METRICS_JSON = "/data/ml_metrics.json"   # bind-mounted -> D:\\bigdata\\ml_metrics.json
 LABEL = "purchased"
+
+# ---------------------------------------------------------------------------
+# FEATURES -- and why each one is (or is NOT) leakage
+# ---------------------------------------------------------------------------
+# batch_etl.py builds each session row with:
+#     event_count   = view_count + cart_count + purchase_count   (exact, 100%)
+#     purchased     = (purchase_count > 0)
+#
+# So with event_count + view_count + cart_count in the features, the model can
+# rebuild the answer arithmetically:
+#     purchase_count = event_count - view_count - cart_count
+#     purchased      = 1 if purchase_count > 0
+# That is EXACT label reconstruction, not prediction. It is why the first
+# training run scored LogisticRegression AUC = 1.0000 (a linear model finds the
+# linear inequality event-count - view - cart > 0 on the first iteration),
+# while RandomForest/GBT -- which see only sqrt(6)=2 features per split --
+# "only" reached 0.98.
+#
+# FIX: event_count is dropped. purchase_count can no longer be reconstructed,
+# and the remaining signals are all legitimately known *before* the outcome:
+# views, add-to-carts, distinct products, price shown and time spent.
 FEATURES = [
-    "event_count",
     "view_count",
     "cart_count",
     "unique_products",
     "total_price",
     "session_length_sec",
-    # purchase_count intentionally absent (leakage), user_id used only for the split
+    # purchase_count excluded (it IS the label), event_count excluded (it leaks
+    # it), user_id used only for the split and never as a feature.
 ]
 
 TRAIN_FRACTION_NOTE = "80% of users train / 20% of users test"

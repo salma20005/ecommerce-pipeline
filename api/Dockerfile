@@ -11,6 +11,11 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # so plain `python` cannot import it until PYTHONPATH points at them.
 ENV PYTHONPATH=/opt/spark/python/lib/pyspark.zip:/opt/spark/python/lib/py4j-0.10.9.7-src.zip
 
+# Driver memory is a JVM flag (-Xmx): it has to be an ENV var, setting
+# spark.driver.memory inside SparkSession.builder is silently ignored.
+ENV SPARK_DRIVER_MEMORY=1g
+ENV SPARK_LOCAL_IP=127.0.0.1
+
 WORKDIR /app
 COPY main.py /app/main.py
 

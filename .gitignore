@@ -24,3 +24,8 @@ Thumbs.db
 
 # local job logs
 *.log
+
+# scratch helpers used while monitoring a training run (not project code)
+spark/_ml_status.py
+spark/_ml_timing.py
+spark/leakage_out.txt
