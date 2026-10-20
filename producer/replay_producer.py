@@ -64,11 +64,21 @@ def main() -> None:
     # chunked read: memory stays flat no matter how big the file is
     for chunk in pd.read_csv(CSV_PATH, chunksize=CHUNK_SIZE):
         rows = chunk.where(pd.notnull(chunk), None).to_dict(orient="records")
+        sent_skipped = 0
         for row in rows:
+            # some CSV rows have an empty user_session (NaN -> None); the key
+            # serializer would crash on them. Invalid sessions are dropped
+            # anyway by batch_etl/streaming (dropna), so skip them at the
+            # source too -- "validate before processing".
+            if row.get("user_session") is None:
+                sent_skipped += 1
+                continue
             producer.send(TOPIC, key=row["user_session"], value=row)
             sent += 1
             if delay:
                 time.sleep(delay)
+        if sent_skipped:
+            print(f"skipped {sent_skipped} rows with null user_session", flush=True)
 
         elapsed = time.time() - start
         rate = sent / elapsed if elapsed else 0
