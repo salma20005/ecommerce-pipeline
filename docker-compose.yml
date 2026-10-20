@@ -162,6 +162,107 @@ services:
     restart: unless-stopped
     mem_limit: 2g
 
+  # ============================================================
+  # Stage 6: Airflow - batch workflow orchestration (poster box).
+  # Postgres holds the metadata; the scheduler carries the docker CLI
+  # so DAG tasks run the already-proven spark-submit commands via
+  # `docker exec`.  Airflow moves no data itself -- it owns order,
+  # retries, logs and the two validate_* gates.
+  # Web UI: http://localhost:8080  (admin / admin)
+  # ============================================================
+  airflow-db:
+    image: postgres:15-alpine
+    container_name: airflow-db
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-data:/var/lib/postgresql/data
+    mem_limit: 384m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  airflow-init:
+    build: ./airflow
+    container_name: airflow-init
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+    environment: &airflow-env
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow-db:5432/airflow
+    # NOTE: the official image entrypoint prefixes bare commands with "airflow",
+    # so "bash" (not /bin/bash) is the magic word that runs a shell directly.
+    command: ["bash", "-c", "airflow db migrate && airflow users create -u admin -p admin -r Admin -e admin@example.com -f Admin -l User || true"]
+    restart: "no"
+    mem_limit: 512m
+
+  airflow-scheduler:
+    build: ./airflow
+    container_name: airflow-scheduler
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      spark:
+        condition: service_started
+      namenode:
+        condition: service_started
+      clickhouse:
+        condition: service_started
+    environment: *airflow-env
+    command: airflow scheduler
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+      # tasks call `docker exec ...` -- the socket is srw-rw---- root:root,
+      # hence group 0 below
+      - /var/run/docker.sock:/var/run/docker.sock
+      # read-only: only the validate_input_file task peeks at the CSV
+      - D:/bigdata:/data:ro
+    group_add:
+      - "0"
+    restart: unless-stopped
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+
+  airflow-webserver:
+    build: ./airflow
+    container_name: airflow-webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      airflow-db:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    environment: *airflow-env
+    command: airflow webserver
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/logs:/opt/airflow/logs
+    restart: unless-stopped
+    mem_limit: 768m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
+
 # Named volumes (Docker manages them; physically on the D: drive VHDX)
 volumes:
   clickhouse-data:
+  airflow-db-data:

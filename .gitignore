@@ -25,6 +25,9 @@ Thumbs.db
 # local job logs
 *.log
 
+# Airflow runtime state (dags/ IS committed, logs are not)
+airflow/logs/
+
 # scratch helpers used while monitoring a training run (not project code)
 spark/_ml_status.py
 spark/_ml_timing.py
