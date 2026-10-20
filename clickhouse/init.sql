@@ -79,3 +79,19 @@ CREATE TABLE IF NOT EXISTS ecommerce.business_alerts
 )
 ENGINE = MergeTree
 ORDER BY window_start;
+
+-- ML evaluation metrics, one row per trained model
+-- (written by ml_training.py -> /data/ml_metrics.json -> INSERT)
+CREATE TABLE IF NOT EXISTS ecommerce.model_metrics
+(
+    model_name    String,
+    auc_roc       Float64,
+    f1            Float64,
+    precision_score Float64,
+    recall_score  Float64,
+    test_sessions UInt64,
+    trained_at    DateTime
+)
+-- retraining the same model replaces its old row (keeps history clean)
+ENGINE = ReplacingMergeTree(trained_at)
+ORDER BY model_name;
