@@ -24,17 +24,26 @@ Steps (printed as [ml] step k/7 while running):
      and write /data/ml_metrics.json -- one JSON row per model, ready to
      INSERT into the ClickHouse table ecommerce.model_metrics.
 
+Memory notes (8 GB laptop, driver = 2500m):
+  * every cache uses MEMORY_AND_DISK_SER (compacted) -- the plain
+    deserialized cache needed ~1.7 GB and the driver died with
+    OutOfMemoryError halfway through RandomForest.
+  * shuffle partitions = 32, so each task carries half the data.
+  * each model is trained inside try/except: if RandomForest or GBT
+    dies, LogisticRegression's results are still saved.
+
 Run (no --packages needed, nothing to download):
     docker exec spark /opt/spark/bin/spark-submit \
         --master 'local[2]' \
         --driver-memory 2500m \
-        --conf spark.sql.shuffle.partitions=16 \
+        --conf spark.sql.shuffle.partitions=32 \
         /opt/spark-jobs/ml_training.py
 """
 
 import json
 import time
 
+from pyspark import StorageLevel
 from pyspark.ml.classification import (
     GBTClassifier,
     LogisticRegression,
@@ -71,7 +80,11 @@ def build_spark() -> SparkSession:
         SparkSession.builder
         .appName("session-purchase-prediction")
         .config("spark.hadoop.fs.defaultFS", "hdfs://namenode:9000")
-        .config("spark.sql.shuffle.partitions", "16")
+        # 32 (not 16): smaller partitions -> less memory per task. On an 8 GB
+        # laptop this keeps each task's buffers well under the driver heap.
+        .config("spark.sql.shuffle.partitions", "32")
+        # never let a single wide aggregation blow the heap: spill to disk
+        .config("spark.sql.autoBroadcastJoinThreshold", "-1")
         .getOrCreate()
     )
 
@@ -111,9 +124,13 @@ def main() -> None:
     )
 
     # ---- step 3/7: user-based split -------------------------------------
+    # NOTE: MEMORY_AND_DISK_SER = COMPACTED cache. On an 8 GB laptop the plain
+    # (deserialized) cache needed ~1.7 GB for train+test and made the driver
+    # die with OutOfMemoryError during RandomForest. Serialized needs ~4x less.
+    SER = StorageLevel.MEMORY_AND_DISK_SER
     log(f"step 3/7: split ({TRAIN_FRACTION_NOTE})")
-    train = sessions.filter(F.pmod("user_id", F.lit(5)) != 0).cache()
-    test = sessions.filter(F.pmod("user_id", F.lit(5)) == 0).cache()
+    train = sessions.filter(F.pmod("user_id", F.lit(5)) != 0).persist(SER)
+    test = sessions.filter(F.pmod("user_id", F.lit(5)) == 0).persist(SER)
     n_train = train.count()
     n_test = test.count()
     log(f"       train={n_train:,} sessions | test={n_test:,} sessions")
@@ -124,11 +141,16 @@ def main() -> None:
     n_pos = next((r["count"] for r in counts if r[LABEL] == 1), 1)
     n_neg = next((r["count"] for r in counts if r[LABEL] == 0), 1)
     n_total = n_pos + n_neg
-    train = train.withColumn(
+    # build the weighted train set, then DROP the unweighted cache so we never
+    # hold two full copies of 7.4M rows in memory at the same time.
+    train_weighted = train.withColumn(
         "weight",
         F.when(F.col(LABEL) == 1, n_total / (2.0 * n_pos))
          .otherwise(n_total / (2.0 * n_neg)),
-    ).cache()
+    ).persist(SER)
+    train_weighted.count()          # materialize the new cache ...
+    train.unpersist()               # ... then free the old one
+    train = train_weighted
     log(f"       positives={n_pos:,} negatives={n_neg:,} "
         f"-> weight(pos)={n_total / (2.0 * n_pos):.2f}")
 
@@ -150,14 +172,21 @@ def main() -> None:
 
     results = []
     fitted = {}
+    failed = {}
     for name, clf in candidates.items():
         if not clf.hasParam("weightCol"):
             log(f"step 5/7: {name} does not support weightCol -> training unweighted")
         t0 = time.time()
         log(f"step 5/7: training {name} ...")
-        model = clf.fit(train)
-        fitted[name] = model
-        log(f"step 5/7: {name} trained in {time.time() - t0:.1f}s")
+        try:
+            model = clf.fit(train)
+            fitted[name] = model
+            log(f"step 5/7: {name} trained in {time.time() - t0:.1f}s")
+        except Exception as exc:      # noqa: BLE001 -- one weak model must not
+            failed[name] = f"{type(exc).__name__}: {exc}"   # kill the whole run
+            log(f"step 5/7: {name} FAILED after {time.time() - t0:.1f}s -> {failed[name]}")
+    if not fitted:
+        raise RuntimeError(f"all models failed: {failed}")
 
     # ---- step 6/7: evaluate on UNSEEN users ------------------------------
     log("step 6/7: evaluating on held-out users ...")
@@ -167,7 +196,7 @@ def main() -> None:
     )
     for name, model in fitted.items():
         t0 = time.time()
-        preds = model.transform(test).cache()
+        preds = model.transform(test).persist(SER)
         auc = auc_eval.evaluate(preds)
         precision, recall, f1, n = evaluate(preds)
         results.append({
