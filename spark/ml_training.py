@@ -151,7 +151,7 @@ def main() -> None:
     results = []
     fitted = {}
     for name, clf in candidates.items():
-        if "weightCol" not in clf.getParamNames():
+        if not clf.hasParam("weightCol"):
             log(f"step 5/7: {name} does not support weightCol -> training unweighted")
         t0 = time.time()
         log(f"step 5/7: training {name} ...")
