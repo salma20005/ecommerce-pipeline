@@ -29,9 +29,12 @@ Steps (printed as [ml] step k/7 while running):
      INSERT into the ClickHouse table ecommerce.model_metrics.
 
 Memory notes (8 GB laptop, driver = 2500m):
-  * every cache uses MEMORY_AND_DISK_SER (compacted) -- the plain
-    deserialized cache needed ~1.7 GB and the driver died with
-    OutOfMemoryError halfway through RandomForest.
+  * the real memory fix is NOT the storage level -- in PySpark 3.x,
+    MEMORY_AND_DISK is already serialized (deserialized=False) and the
+    MEMORY_AND_DISK_SER constant was removed in 3.2.
+  * the fix is that the 7.4M-row train set is never cached twice: the
+    weighted copy is materialized, then the unweighted one is dropped.
+    Holding both at once is what blew the heap during RandomForest.
   * shuffle partitions = 32, so each task carries half the data.
   * each model is trained inside try/except: if RandomForest or GBT
     dies, LogisticRegression's results are still saved.
@@ -149,13 +152,17 @@ def main() -> None:
     )
 
     # ---- step 3/7: user-based split -------------------------------------
-    # NOTE: MEMORY_AND_DISK_SER = COMPACTED cache. On an 8 GB laptop the plain
-    # (deserialized) cache needed ~1.7 GB for train+test and made the driver
-    # die with OutOfMemoryError during RandomForest. Serialized needs ~4x less.
-    SER = StorageLevel.MEMORY_AND_DISK_SER
+    # MEMORY_AND_DISK is used on purpose. NOTE: in PySpark 3.x this level is
+    # ALREADY serialized (deserialized=False) -- there is no MEMORY_AND_DISK_SER
+    # constant any more, it was removed in 3.2. So the real memory saving is not
+    # the storage level; it is NEVER holding two copies of the 7.4M-row train
+    # set at once (see step 4 below, where the unweighted copy is dropped as
+    # soon as the weighted one is materialized). That duplication is what made
+    # the driver die with OutOfMemoryError during RandomForest.
+    LEVEL = StorageLevel.MEMORY_AND_DISK
     log(f"step 3/7: split ({TRAIN_FRACTION_NOTE})")
-    train = sessions.filter(F.pmod("user_id", F.lit(5)) != 0).persist(SER)
-    test = sessions.filter(F.pmod("user_id", F.lit(5)) == 0).persist(SER)
+    train = sessions.filter(F.pmod("user_id", F.lit(5)) != 0).persist(LEVEL)
+    test = sessions.filter(F.pmod("user_id", F.lit(5)) == 0).persist(LEVEL)
     n_train = train.count()
     n_test = test.count()
     log(f"       train={n_train:,} sessions | test={n_test:,} sessions")
@@ -166,15 +173,15 @@ def main() -> None:
     n_pos = next((r["count"] for r in counts if r[LABEL] == 1), 1)
     n_neg = next((r["count"] for r in counts if r[LABEL] == 0), 1)
     n_total = n_pos + n_neg
-    # build the weighted train set, then DROP the unweighted cache so we never
-    # hold two full copies of 7.4M rows in memory at the same time.
+    # Materialize the weighted copy FIRST, then free the unweighted one, so the
+    # two 7.4M-row caches never coexist in the executor memory.
     train_weighted = train.withColumn(
         "weight",
         F.when(F.col(LABEL) == 1, n_total / (2.0 * n_pos))
          .otherwise(n_total / (2.0 * n_neg)),
-    ).persist(SER)
-    train_weighted.count()          # materialize the new cache ...
-    train.unpersist()               # ... then free the old one
+    ).persist(LEVEL)
+    train_weighted.count()
+    train.unpersist()
     train = train_weighted
     log(f"       positives={n_pos:,} negatives={n_neg:,} "
         f"-> weight(pos)={n_total / (2.0 * n_pos):.2f}")
@@ -221,7 +228,7 @@ def main() -> None:
     )
     for name, model in fitted.items():
         t0 = time.time()
-        preds = model.transform(test).persist(SER)
+        preds = model.transform(test).persist(LEVEL)
         auc = auc_eval.evaluate(preds)
         precision, recall, f1, n = evaluate(preds)
         results.append({
