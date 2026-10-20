@@ -86,9 +86,9 @@ services:
 
   # Spark runs in local mode: one container, [2] threads.
   # Jobs are submitted into it with docker exec ... spark-submit
-  # (Official Apache image; Bitnami removed their free images from Docker Hub)
+  # (Official Apache image + numpy for MLlib -- see spark/Dockerfile)
   spark:
-    image: apache/spark:3.5.7-python3
+    build: ./spark
     container_name: spark
     environment:
       - SPARK_MODE=local
