@@ -21,3 +21,6 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+
+# local job logs
+*.log
