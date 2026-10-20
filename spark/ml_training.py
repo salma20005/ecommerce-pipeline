@@ -97,7 +97,7 @@ def main() -> None:
     spark = build_spark()
 
     # ---- step 1/7: read -------------------------------------------------
-    log("step 1/7: reading sessions from", SESSIONS)
+    log(f"step 1/7: reading sessions from {SESSIONS}")
     sessions = spark.read.parquet(SESSIONS)
     log(f"       total sessions: {sessions.count():,}")
 
