@@ -103,14 +103,20 @@ services:
   # ============================================================
   # Stage 4: ClickHouse - analytical serving layer.
   # HDFS stores the big files; ClickHouse answers dashboard
-  # queries in milliseconds. Power BI reads it via HTTP (:8123).
+  # queries in milliseconds. Power BI reads it via HTTP (host :18123).
   # ============================================================
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
     container_name: clickhouse
     restart: unless-stopped
     ports:
-      - "8123:8123"   # HTTP API (loader + Power BI)
+      # Host port = 18123, container port = 8123 (unchanged).
+      # Windows reserves dynamic Hyper-V/WSL exclusion ranges that have
+      # included 8083-8182 on this laptop -- 8123 fell inside and Docker
+      # got WSAEACCES ("forbidden by its access permissions") on bind.
+      # 18123 sits outside every observed range and needs no admin rights.
+      # In-compose traffic keeps using the service name, i.e. clickhouse:8123.
+      - "18123:8123"   # HTTP API from Windows (Power BI, curl)
       - "9000:9000"   # native protocol (Spark JDBC)
     environment:
       CLICKHOUSE_DB: ecommerce
@@ -256,7 +262,11 @@ services:
     restart: unless-stopped
     mem_limit: 768m
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      # python3, not curl: the slim image has no curl and adding it costs an
+      # apt-get round-trip that keeps dying on this connection. urlopen()
+      # raises on any non-2xx, so a clean return == healthy.
+      test: ["CMD", "python3", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 10

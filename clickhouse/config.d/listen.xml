@@ -1,5 +1,5 @@
 <!-- The image ships listening on localhost only; open it to the Docker
-     network (ch-loader, Spark JDBC) and to the host (Power BI on :8123) -->
+     network (ch-loader, Spark JDBC) and to the host (Power BI on :18123) -->
 <clickhouse>
     <listen_host>0.0.0.0</listen_host>
 </clickhouse>
