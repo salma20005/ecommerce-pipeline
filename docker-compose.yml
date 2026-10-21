@@ -9,7 +9,14 @@ services:
     container_name: kafka
     ports:
       - "9092:9092"   # broker
-      - "8081:8080"   # built-in UI (optional)
+      # NOTE: apache/kafka:3.8.0 ships NO web UI. This mapping has never
+      # served anything -- it has been in the file since the first commit
+      # on a wrong assumption, and localhost:8081 always closed empty.
+      # Left as-is ON PURPOSE: changing the port mapping would recreate the
+      # container, and kafka has no volume, so its topics and consumer
+      # offsets (which ch-loader resumes from) would be lost.
+      # The poster's streaming view comes from ClickHouse event_metrics.
+      - "8081:8080"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
